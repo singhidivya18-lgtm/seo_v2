@@ -1,0 +1,13 @@
+google-adk
+litellm
+pytrends
+requests
+beautifulsoup4
+readability-lxml
+python-dotenv
+python-docx
+pillow
+aiohttp
+fastapi
+uvicorn
+python-multipart

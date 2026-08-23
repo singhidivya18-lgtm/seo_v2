@@ -1,0 +1,20 @@
+{
+  "name": "seo-v2-a2ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@a2ui/lit": "^0.10.3",
+    "@a2ui/markdown-it": "^0.1.1",
+    "@a2ui/web_core": "^0.10.6",
+    "lit": "^3.2.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}

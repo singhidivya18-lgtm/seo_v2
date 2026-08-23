@@ -1,0 +1,46 @@
+# Secrets — never commit
+.env
+*.env.local
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Generated artifacts
+generated_images/
+*.docx
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Logs
+*.log
+adk_*.log
+server_*.log
+
+# Node (UI)
+node_modules/
+
+# Runtime state
+sessions.json
+batch_progress.json
+ui_url.txt
+
+# ADK local state
+.adk/
+null/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
