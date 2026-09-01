@@ -497,7 +497,7 @@ export class SeoApp extends LitElement {
 
         <footer class="footer">
           <span>SEO Studio <i>·</i> built for deliberate publishing</span>
-          <span>AI Router Switzerland <i>·</i> human review recommended</span>
+          <span>AI Router Switzerland <i>·</i> human review recommended <i>·</i> v1.1</span>
         </footer>
       </div>
     `;
