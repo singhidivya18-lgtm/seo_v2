@@ -1,7 +1,7 @@
 """BatchCoordinator agent â€” takes curated titles and produces one .docx per title."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 from ..tools.batch_tools import run_article_batch, run_single_pipeline
 
@@ -97,7 +97,7 @@ ERROR HANDLING:
 
 batch_coordinator_agent = LlmAgent(
     name="BatchCoordinator",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Produces a downloadable .docx for each curated article title by running the SEO pipeline per title in parallel.",
     instruction=INSTRUCTION,
     tools=[run_article_batch, run_single_pipeline],

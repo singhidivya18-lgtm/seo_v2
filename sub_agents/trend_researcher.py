@@ -1,7 +1,7 @@
 """TrendResearcher agent â€” discovers trending topics and keywords."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 from ..tools.trend_tools import get_google_trends
 from ..tools.search_tools import web_search_with_grounding
@@ -111,7 +111,7 @@ ERROR HANDLING:
 
 trend_researcher_agent = LlmAgent(
     name="TrendResearcher",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Discovers trending topics and keywords for a given subject using Google Trends and web search.",
     instruction=INSTRUCTION,
     tools=[get_google_trends, web_search_with_grounding],

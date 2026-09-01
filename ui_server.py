@@ -301,13 +301,21 @@ async def stream(request: Request):
     )
 
 
-async def _run_curate(field: str) -> None:
+async def _run_curate(field: str, claimed: bool = False) -> None:
     global _job
     async with _job_lock:
-        if _job["state"] in ("curating", "running"):
+        if not claimed and _job["state"] in ("curating", "running"):
             return
-        _job.update(state="curating", field=field, results=[], message="Curating titles…")
-        await _publish_state()
+        if not claimed:
+            _job.update(
+                state="curating",
+                field=field,
+                titles=[],
+                results=[],
+                batch_id="",
+                message="Curating titles…",
+            )
+            await _publish_state()
     try:
         result = await curate_titles(field)
         async with _job_lock:
@@ -330,20 +338,24 @@ async def _run_curate(field: str) -> None:
         await _publish_state()
 
 
-async def _run_batch(titles: list[str], concurrency: int, max_rounds: int) -> None:
+async def _run_batch(
+    titles: list[str], concurrency: int, max_rounds: int, claimed: bool = False
+) -> None:
     global _job
     async with _job_lock:
-        if _job["state"] == "running":
+        if not claimed and _job["state"] in ("curating", "running"):
             return
-        _job.update(
-            state="running",
-            titles=titles,
-            concurrency=concurrency,
-            max_rounds=max_rounds,
-            results=[{"title": t, "status": "queued"} for t in titles],
-            message=f"Running batch for {len(titles)} titles…",
-        )
-        await _publish_state()
+        if not claimed:
+            _job.update(
+                state="running",
+                field=field,
+                titles=titles,
+                concurrency=concurrency,
+                max_rounds=max_rounds,
+                results=[{"title": t, "status": "queued"} for t in titles],
+                message=f"Running batch for {len(titles)} titles…",
+            )
+            await _publish_state()
     try:
         result = await run_article_batch(titles, concurrency=concurrency, max_rounds=max_rounds)
         async with _job_lock:
@@ -431,24 +443,53 @@ async def action(request: Request):
         field = str(ctx.get("field", "")).strip()
         if not field:
             return JSONResponse({"ok": False, "error": "Field is required"}, status_code=400)
-        asyncio.create_task(_run_curate(field))
+        async with _job_lock:
+            if _job["state"] in ("curating", "running"):
+                return JSONResponse(
+                    {"ok": False, "error": "Another job is already running. Wait for it to finish."},
+                    status_code=409,
+                )
+            _job.update(
+                state="curating",
+                field=field,
+                titles=[],
+                results=[],
+                batch_id="",
+                message="Curating titles…",
+            )
+            await _publish_state()
+        asyncio.create_task(_run_curate(field, claimed=True))
         return {"ok": True, "message": "Curation started"}
     if name == "run_batch":
         raw = str(ctx.get("titlesRaw", "")).strip()
         field = str(ctx.get("field", "")).strip()
         titles = [t.strip() for t in raw.splitlines() if t.strip()]
-        if not titles and field:
-            async with _job_lock:
-                titles = list(_job["titles"])
-        if not titles:
-            return JSONResponse({"ok": False, "error": "No titles provided"}, status_code=400)
-        concurrency = 2
-        max_rounds = 0
         async with _job_lock:
+            if _job["state"] in ("curating", "running"):
+                return JSONResponse(
+                    {"ok": False, "error": "Another job is already running. Wait for it to finish."},
+                    status_code=409,
+                )
+            if not titles:
+                titles = list(_job["titles"])
             concurrency = _job["concurrency"]
             max_rounds = _job["max_rounds"]
-        asyncio.create_task(_run_batch(titles[:10], concurrency, max_rounds))
-        return {"ok": True, "message": f"Batch started for {len(titles[:10])} titles"}
+            if not titles:
+                return JSONResponse({"ok": False, "error": "No titles provided"}, status_code=400)
+            titles = titles[:10]
+            _job.update(
+                state="running",
+                titles=titles,
+                concurrency=concurrency,
+                max_rounds=max_rounds,
+                results=[{"title": t, "status": "queued"} for t in titles],
+                message=f"Running batch for {len(titles)} titles…",
+            )
+            await _publish_state()
+        asyncio.create_task(_run_batch(titles, concurrency, max_rounds, claimed=True))
+        return {"ok": True, "message": f"Batch started for {len(titles)} titles"}
+
+    return JSONResponse({"ok": False, "error": "Unknown action"}, status_code=400)
 
 
 @app.get("/api/sessions")

@@ -1,7 +1,7 @@
 """TitleCurator agent â€” discovers trending keywords for a user's field and curates article titles."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 from ..tools.trend_tools import get_google_trends
 from ..tools.search_tools import web_search_with_grounding
@@ -82,7 +82,7 @@ ERROR HANDLING:
 
 title_curator_agent = LlmAgent(
     name="TitleCurator",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Researches trending keywords for the user's field and curates at least 5 distinct article titles.",
     instruction=INSTRUCTION,
     tools=[get_google_trends, web_search_with_grounding],

@@ -1,7 +1,7 @@
 """SocialMediaAdapter agent â€” generates LinkedIn and Twitter versions of approved articles."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 from ..tools.social_tools import format_linkedin_post, format_twitter_thread
 from ..tools.docx_generator import generate_docx
@@ -142,7 +142,7 @@ ERROR HANDLING:
 
 social_adapter_agent = LlmAgent(
     name="SocialMediaAdapter",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Converts approved articles into LinkedIn and Twitter-ready social media posts.",
     instruction=INSTRUCTION,
     tools=[format_linkedin_post, format_twitter_thread, generate_docx, generate_image],

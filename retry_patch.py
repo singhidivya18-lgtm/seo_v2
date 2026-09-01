@@ -1,8 +1,8 @@
 """
 Monkey-patches ADK's LiteLLMClient and litellm.acompletion to retry on
-corrupted / malformed responses from OpenRouter.
+corrupted / malformed responses from AI Router.
 
-OpenRouter intermittently returns all-whitespace or empty content bodies that
+AI Router intermittently returns all-whitespace or empty content bodies that
 previously crashed with JSONDecodeError or, worse, were silently accepted and
 then produced garbage articles.
 
@@ -11,8 +11,7 @@ Retry policy (hardened):
 - Retryable failures:
     * exceptions signalling corrupted JSON ("Unable to get json response",
       "Expecting value", ...) - raised while decoding,
-    * responses that FAIL shape validation: no `choices`, no message content
-      below the sane minimum, or no tool_calls (see _is_valid_response).
+    * responses that have no `choices` or no usable message content/tool call.
 - Exponential backoff with jitter: delay(attempt) = min(BASE * 2**attempt, CAP) + uniform(0, 1).
 - After the last attempt the original error is raised (no silent success).
 - Every retry is logged with attempt number and scheduled delay.
@@ -24,12 +23,12 @@ import random
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 4
-BASE_DELAY_SECONDS = 2.0
-MAX_DELAY_SECONDS = 30.0
-MIN_CONTENT_LENGTH = 8  # sane floor after strip(); tool-call turns are exempt
+MAX_RETRIES = 2
+BASE_DELAY_SECONDS = 1.0
+MAX_DELAY_SECONDS = 8.0
+MIN_CONTENT_LENGTH = 1  # any non-whitespace model turn is a valid response
 
-# Error substrings litellm raises when OpenRouter returns undecodable JSON.
+# Error substrings LiteLLM raises when AI Router returns undecodable JSON.
 _CORRUPTED_MARKERS = ("Unable to get json response", "Expecting value")
 
 
@@ -59,20 +58,28 @@ def _backoff_delay(attempt: int) -> float:
 
 def _extract_content(choice) -> str | None:
     """content from choice.message (non-stream) or choice.delta (stream chunks)."""
-    msg = getattr(choice, "message", None) or getattr(choice, "delta", None)
+    msg = _field(choice, "message") or _field(choice, "delta")
     if msg is None:
         return None
-    content = getattr(msg, "content", None)
+    content = _field(msg, "content")
     if isinstance(content, list):  # multimodal providers may return parts
         content = "".join(str(p) for p in content)
     return content
 
 
+def _field(value, name: str, default=None):
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
 def _has_tool_calls(choice) -> bool:
-    msg = getattr(choice, "message", None) or getattr(choice, "delta", None)
-    if msg is None:
-        return False
-    return bool(getattr(msg, "tool_calls", None))
+    msg = _field(choice, "message") or _field(choice, "delta")
+    return bool(
+        _field(msg, "tool_calls")
+        or _field(msg, "function_call")
+        or _field(choice, "tool_calls")
+    )
 
 
 def _choice_is_valid(choice) -> bool:
@@ -113,14 +120,14 @@ async def _call_with_retries(factory):
                 return resp
             raise InvalidResponseError(
                 f"Invalid response shape: choices={bool(getattr(resp, 'choices', None))!r}, "
-                f"content under {MIN_CONTENT_LENGTH} chars and no tool_calls"
+                "empty response content and no tool calls"
             )
         except Exception as e:
             if attempt == MAX_RETRIES - 1 or not _is_retryable(e):
                 raise
             delay = _backoff_delay(attempt)
             logger.warning(
-                f"OpenRouter corrupted/invalid response (attempt {attempt + 1}/{MAX_RETRIES}). "
+                f"AI Router corrupted/invalid response (attempt {attempt + 1}/{MAX_RETRIES}). "
                 f"Retrying in {delay:.1f}s... ({e})"
             )
             await asyncio.sleep(delay)
@@ -148,15 +155,14 @@ async def _retry_generator(original_func, *args, **kwargs):
             if _is_valid_stream(parts, saw_tool_calls):
                 return
             raise InvalidResponseError(
-                f"Stream ended with {sum(len(p.strip()) for p in parts)} content chars "
-                f"(min {MIN_CONTENT_LENGTH}) and no tool_calls"
+                "Stream ended without usable content or tool calls"
             )
         except Exception as e:
             if attempt == MAX_RETRIES - 1 or not _is_retryable(e):
                 raise
             delay = _backoff_delay(attempt)
             logger.warning(
-                f"OpenRouter corrupted stream (attempt {attempt + 1}/{MAX_RETRIES}). "
+                f"AI Router corrupted stream (attempt {attempt + 1}/{MAX_RETRIES}). "
                 f"Retrying in {delay:.1f}s... ({e})"
             )
             await asyncio.sleep(delay)

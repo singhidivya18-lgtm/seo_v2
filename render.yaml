@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: seo-v2
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/state
+    envVars:
+      - key: AIROUTER_API_KEY
+        sync: false
+      - key: AIROUTER_BASE_URL
+        value: https://api.airouter.ch/v1
+      - key: AIROUTER_MODEL
+        value: Qwen3.8
+      - key: AIROUTER_REASONING_EFFORT
+        value: none
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: PEXELS_API_KEY
+        sync: false
+      - key: DEFAULT_GEO
+        value: US

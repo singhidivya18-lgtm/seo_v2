@@ -21,13 +21,86 @@ from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
 from google.genai import types
 
+from ..ai_router import ai_router_completion_kwargs
 from .docx_generator import generate_docx
 
 _SEO_APP_NAME = "seo_v2"
 _BATCH_PROGRESS_FILENAME = "batch_progress.json"
 _TRIVIAL_CONTENT_LEN = 200
+_PIPELINE_TIMEOUT_SECONDS = 120
+_FALLBACK_TIMEOUT_SECONDS = 60
 
 _batch_progress_lock = threading.Lock()
+
+
+def _parse_curated_titles(final_text: str, field: str) -> list[str]:
+    """Extract five usable titles while discarding model formatting metadata."""
+    titles: list[str] = []
+    in_titles = False
+    for line in final_text.splitlines():
+        line = line.strip()
+        low = line.lower()
+        if low.startswith("# curated titles"):
+            in_titles = True
+            continue
+        if low.startswith("##") or low.startswith("#"):
+            if in_titles and low.startswith("##"):
+                break
+            continue
+        if not in_titles and not (
+            line[:1].isdigit() and len(line) > 1 and line[1] in ". )\t"
+        ):
+            continue
+
+        stripped = line.lstrip("0123456789.)- \t").replace("**", "").strip()
+        if not stripped or len(stripped) < 8:
+            continue
+        if any(
+            marker in stripped.lower()
+            for marker in (
+                "i need to",
+                "let me",
+                "call get_google_trends",
+                "call web_search_with_grounding",
+                "these are independent",
+                "these are parallel",
+                "the user wants",
+                "i'll",
+                "i can",
+                "i'm going to",
+                "combine data",
+                "google trends",
+                "web search:",
+                "trend evidence",
+                "the most recent",
+                "field:",
+                "topic:",
+                "category:",
+                "craft 5 titles",
+            )
+        ):
+            continue
+
+        if " - \"" in stripped:
+            stripped = stripped.split(" - \"", 1)[0].strip()
+        if stripped and stripped.lower() not in {title.lower() for title in titles}:
+            titles.append(stripped)
+
+    field_label = field.strip().strip("-:").title() or "This Topic"
+    year = datetime.now(timezone.utc).year
+    fallback_titles = [
+        f"How {field_label} Is Changing in {year}",
+        f"A Practical Guide to {field_label} for Beginners",
+        f"The Biggest {field_label} Trends to Watch This Year",
+        f"What {field_label} Means for Businesses and Everyday Users",
+        f"How to Evaluate New {field_label} Products and Ideas",
+    ]
+    for fallback in fallback_titles:
+        if len(titles) >= 5:
+            break
+        if fallback.lower() not in {title.lower() for title in titles}:
+            titles.append(fallback)
+    return titles[:5]
 
 
 def _docx_snapshot(output_dir: str) -> dict[str, float]:
@@ -225,50 +298,7 @@ async def curate_titles(field: str) -> dict[str, Any]:
             if text.strip():
                 final_text += "\n" + text
 
-        titles: list[str] = []
-        in_titles = False
-        for line in final_text.splitlines():
-            line = line.strip()
-            low = line.lower()
-            if low.startswith("# curated titles"):
-                in_titles = True
-                continue
-            if low.startswith("##") or low.startswith("#"):
-                if in_titles and low.startswith("##"):
-                    break
-                continue
-            if not in_titles:
-                # Fallback: also accept numbered items outside the header
-                # (the model sometimes omits the header and just lists titles).
-                if not (line[:1].isdigit() and (len(line) > 1 and line[1] in ". )\t")):
-                    continue
-            stripped = line.lstrip("0123456789.)- \t").replace("**", "").strip()
-            if not stripped or len(stripped) < 8:
-                continue
-            if any(
-                marker in stripped.lower()
-                for marker in (
-                    "i need to",
-                    "let me",
-                    "call get_google_trends",
-                    "call web_search_with_grounding",
-                    "these are independent",
-                    "these are parallel",
-                    "the user wants",
-                    "i'll",
-                    "i can",
-                    "i'm going to",
-                    "combine data",
-                    "google trends",
-                    "web search:",
-                    "trend evidence",
-                    "the most recent",
-                )
-            ):
-                continue
-            titles.append(stripped)
-
-        titles = titles[:5]
+        titles = _parse_curated_titles(final_text, field)
         if len(titles) < 5:
             return {
                 "status": "error",
@@ -419,6 +449,68 @@ async def _execute_pipeline(
         }, ""
 
 
+async def _generate_fallback_article(title: str, job_id: str | None = None) -> dict[str, Any]:
+    """Generate an article directly when the enrichment pipeline cannot finish."""
+    from litellm import acompletion
+
+    prompt = f"""Write a complete, publication-ready SEO article about this exact title:
+{title}
+
+Requirements:
+- 900-1400 words with a strong introduction, useful subheadings, and a conclusion.
+- Stay strictly on the subject in the title; never substitute a different product,
+  company, or topic.
+- Use clear, factual language. Do not invent statistics, quotes, or citations.
+- If current research is unavailable, state that the article is a general overview.
+- Return only the article in Markdown. Do not include analysis or a plan."""
+
+    try:
+        response = await asyncio.wait_for(
+            acompletion(
+                **ai_router_completion_kwargs(),
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.45,
+                max_tokens=2200,
+            ),
+            timeout=_FALLBACK_TIMEOUT_SECONDS,
+        )
+        content = ""
+        choices = getattr(response, "choices", None) or []
+        if choices:
+            message = getattr(choices[0], "message", None)
+            content = getattr(message, "content", None) or ""
+        content = _strip_thinking(str(content)).strip()
+        if len(content) < _TRIVIAL_CONTENT_LEN:
+            return {
+                "status": "error",
+                "error_message": "AI Router fallback returned an article that was too short.",
+            }
+
+        document = await generate_docx(
+            article_text=content,
+            title=title,
+            output_dir=_resolve_output_dir(),
+            job_id=job_id,
+        )
+        if document.get("status") != "success":
+            return {
+                "status": "error",
+                "error_message": document.get("error_message", "Fallback document generation failed."),
+            }
+        filepath = str(document.get("filepath", ""))
+        if job_id:
+            assert job_id in filepath, f"job_id {job_id} missing from {filepath}"
+        return _result_dict(
+            title,
+            filepath,
+            fallback_used=True,
+            note="The full enrichment pipeline exceeded its time limit; a direct article was generated.",
+            job_id=job_id,
+        )
+    except Exception as e:
+        return {"status": "error", "error_message": f"Direct article fallback failed: {e}"}
+
+
 async def run_single_pipeline(title: str, job_id: str | None = None) -> dict[str, Any]:
     """Run the full Trending Article SEO pipeline for a single article title.
 
@@ -456,31 +548,42 @@ async def run_single_pipeline(title: str, job_id: str | None = None) -> dict[str
 
     title = title.strip()
 
-    result, content = await _execute_pipeline(
-        title, f"Write a complete article based on this title: {title}. SUBJECT LOCK: the article must be about the exact subject named in the title ({title}). If research results concern a different product, brand, or company (e.g. a similarly-named competitor), IGNORE them - never substitute another subject.",
-        job_id=job_id,
-    )
+    try:
+        result, content = await asyncio.wait_for(
+            _execute_pipeline(
+                title,
+                f"Write a complete article based on this title: {title}. SUBJECT LOCK: the article must be about the exact subject named in the title ({title}). If research results concern a different product, brand, or company (e.g. a similarly-named competitor), IGNORE them - never substitute another subject.",
+                job_id=job_id,
+            ),
+            timeout=_PIPELINE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        result, content = (
+            {
+                "status": "error",
+                "error_message": f"Full pipeline timed out after {_PIPELINE_TIMEOUT_SECONDS} seconds.",
+            },
+            "",
+        )
 
     if result.get("status") == "error":
-        retry, _ = await _execute_pipeline(
-            title,
-            f"Your previous attempt failed. Please try again and write a complete article on this title: {title}. SUBJECT LOCK: the article must be about the exact subject named in the title ({title}). If research results concern a different product, brand, or company, IGNORE them - never substitute another subject.",
-            job_id=job_id,
-        )
-        if retry.get("status") == "success":
-            return {**retry, "retried_after_error": True}
+        result = {**result, "title": title}
+        if job_id:
+            result["job_id"] = job_id
+        fallback = await _generate_fallback_article(title, job_id=job_id)
+        if fallback.get("status") == "success":
+            return {**fallback, "fallback_after_pipeline_error": True}
+        if fallback.get("error_message"):
+            result["error_message"] = (
+                f"{result.get('error_message', 'Pipeline failed')} "
+                f"Fallback: {fallback['error_message']}"
+            )
         return result
 
     if result.get("fallback_used") and len(content) < _TRIVIAL_CONTENT_LEN:
-        retry, retry_content = await _execute_pipeline(
-            title,
-            f"Your previous attempt produced an article that was too short. Write a complete, detailed 800-2000 word article on this title: {title}. SUBJECT LOCK: the article must be about the exact subject named in the title ({title}). If research results concern a different product, brand, or company, IGNORE them - never substitute another subject.",
-            job_id=job_id,
-        )
-        if retry.get("status") == "success" and (
-            not retry.get("fallback_used") or len(retry_content) > len(content)
-        ):
-            return {**retry, "retried_for_short_content": True}
+        fallback = await _generate_fallback_article(title, job_id=job_id)
+        if fallback.get("status") == "success":
+            return {**fallback, "fallback_after_short_content": True}
 
     return result
 

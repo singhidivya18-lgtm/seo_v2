@@ -1,7 +1,7 @@
 """ContentExtractor agent â€” extracts content from authoritative sources."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 from ..tools.search_tools import web_search_with_grounding
 from ..tools.extraction_tools import extract_url_content
@@ -143,7 +143,7 @@ ERROR HANDLING:
 
 content_extractor_agent = LlmAgent(
     name="ContentExtractor",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Searches for authoritative sources, extracts content, and identifies factual claims for fact-checking.",
     instruction=INSTRUCTION,
     tools=[web_search_with_grounding, extract_url_content],

@@ -5,6 +5,7 @@ from datetime import date
 
 from litellm import acompletion
 
+from ..ai_router import ai_router_completion_kwargs
 from .extraction_tools import extract_url_content
 
 _TODAY = date.today().strftime('%B %d, %Y')
@@ -89,7 +90,7 @@ Respond with ONLY a JSON object (no other text):
 {{"verdict": "supported|contradicted|partial|unverifiable", "supports_claim": true|false, "excerpt": "relevant quote from source (max 100 chars)"}}"""
 
             response = await acompletion(
-                model="openai/deepseek-v4-flash",
+                **ai_router_completion_kwargs(),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
             )

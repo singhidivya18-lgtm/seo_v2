@@ -1,7 +1,7 @@
 """Editor agent â€” polishes articles for clarity, grammar, and citation integrity."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 _TODAY = __import__('datetime').date.today().strftime('%B %d, %Y')
 
@@ -114,7 +114,7 @@ ERROR HANDLING:
 
 editor_agent = LlmAgent(
     name="Editor",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Edits and polishes articles for clarity, grammar, tone, and citation integrity.",
     instruction=INSTRUCTION,
     tools=[],

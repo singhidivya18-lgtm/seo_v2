@@ -1,7 +1,58 @@
 """Google Trends data retrieval tool using pytrends."""
 
-import time
+import asyncio
 from typing import Any
+
+
+def _get_google_trends_sync(topic: str, geo: str) -> dict[str, Any]:
+    """Fetch Trends data in a worker thread so a slow upstream cannot block the app."""
+    from pytrends.request import TrendReq
+
+    pytrends = TrendReq(
+        hl="en-US",
+        tz=360,
+        timeout=(5, 10),
+        retries=1,
+        backoff_factor=0.2,
+    )
+    pytrends.build_payload(
+        [topic],
+        cat=0,
+        timeframe="today 1-m",
+        geo=geo if geo != "GLOBAL" else "",
+        gprop="",
+    )
+
+    related = pytrends.related_queries()
+    topic_data = related.get(topic, {})
+
+    top_queries = topic_data.get("top", None)
+    rising_queries = topic_data.get("rising", None)
+
+    top_list = []
+    if top_queries is not None and not top_queries.empty:
+        top_list = top_queries["query"].tolist()[:10]
+
+    rising_list = []
+    if rising_queries is not None and not rising_queries.empty:
+        rising_list = rising_queries["query"].tolist()[:10]
+
+    trending_list = []
+    try:
+        trending = pytrends.trending_searches(pn="united_states")
+        if trending is not None and not trending.empty:
+            trending_list = trending[0].tolist()[:10]
+    except Exception:
+        pass
+
+    return {
+        "status": "success",
+        "trending_searches": trending_list,
+        "related_queries_top": top_list,
+        "related_queries_rising": rising_list,
+        "topic": topic,
+        "geo": geo,
+    }
 
 
 async def get_google_trends(topic: str, geo: str = "US") -> dict[str, Any]:
@@ -41,50 +92,14 @@ async def get_google_trends(topic: str, geo: str = "US") -> dict[str, Any]:
     topic = topic.strip()
 
     try:
-        from pytrends.request import TrendReq
-
-        pytrends = TrendReq(hl="en-US", tz=360)
-
-        pytrends.build_payload(
-            [topic],
-            cat=0,
-            timeframe="today 1-m",
-            geo=geo if geo != "GLOBAL" else "",
-            gprop="",
+        return await asyncio.wait_for(
+            asyncio.to_thread(_get_google_trends_sync, topic, geo),
+            timeout=25,
         )
-
-        related = pytrends.related_queries()
-        topic_data = related.get(topic, {})
-
-        top_queries = topic_data.get("top", None)
-        rising_queries = topic_data.get("rising", None)
-
-        top_list = []
-        if top_queries is not None and not top_queries.empty:
-            top_list = top_queries["query"].tolist()[:10]
-
-        rising_list = []
-        if rising_queries is not None and not rising_queries.empty:
-            rising_list = rising_queries["query"].tolist()[:10]
-
-        time.sleep(2)
-
-        trending_list = []
-        try:
-            trending = pytrends.trending_searches(pn="united_states")
-            if trending is not None and not trending.empty:
-                trending_list = trending[0].tolist()[:10]
-        except Exception:
-            pass
-
+    except asyncio.TimeoutError:
         return {
-            "status": "success",
-            "trending_searches": trending_list,
-            "related_queries_top": top_list,
-            "related_queries_rising": rising_list,
-            "topic": topic,
-            "geo": geo,
+            "status": "error",
+            "error_message": "Google Trends retrieval timed out after 25 seconds.",
         }
-
     except Exception as e:
         return {"status": "error", "error_message": f"Google Trends retrieval failed: {str(e)}"}

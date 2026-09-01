@@ -1,7 +1,7 @@
 """ArticleWriter agent â€” writes a fully cited article from verified facts."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 _TODAY = __import__('datetime').date.today().strftime('%B %d, %Y')
 
@@ -145,7 +145,7 @@ ERROR HANDLING:
 
 article_writer_agent = LlmAgent(
     name="ArticleWriter",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Writes a publication-ready article with inline citations using only verified facts.",
     instruction=INSTRUCTION,
     tools=[],

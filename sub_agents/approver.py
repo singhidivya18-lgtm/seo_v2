@@ -1,7 +1,7 @@
 """Approver agent â€” final quality gate for article publication."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 _TODAY = __import__('datetime').date.today().strftime('%B %d, %Y')
 
@@ -119,7 +119,7 @@ ERROR HANDLING:
 
 approver_agent = LlmAgent(
     name="Approver",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Final quality gate that audits articles against 13 checks and issues APPROVED/REJECTED verdict.",
     instruction=INSTRUCTION,
     tools=[],

@@ -6,6 +6,8 @@ from datetime import date
 
 from litellm import acompletion
 
+from ..ai_router import ai_router_completion_kwargs
+
 _TODAY = date.today().strftime('%B %d, %Y')
 
 
@@ -76,7 +78,7 @@ IMAGE SUGGESTION: <one sentence image description>
 POST: <the LinkedIn post text>"""
 
         response = await acompletion(
-            model="openai/deepseek-v4-flash",
+            **ai_router_completion_kwargs(),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
         )
@@ -170,7 +172,7 @@ RULES:
 Return ONLY the numbered tweets, one per line, no other text."""
 
         response = await acompletion(
-            model="openai/deepseek-v4-flash",
+            **ai_router_completion_kwargs(),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
         )

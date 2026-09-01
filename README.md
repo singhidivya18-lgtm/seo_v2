@@ -47,11 +47,11 @@ TrendingArticlePipeline (SequentialAgent)
    Required:
    | Key | Purpose | Get it at |
    |-----|---------|-----------|
-   | `OPENROUTER_API_KEY` | LLM provider (LiteLLM) | https://openrouter.ai/keys |
+   | `AIROUTER_API_KEY` | LLM provider (AI Router Switzerland) | https://airouter.ch/dashboard.html |
    | `TAVILY_API_KEY` | Web search for research & fact-checking | https://tavily.com/ |
    | `PEXELS_API_KEY` | Real stock images | https://www.pexels.com/api/ |
 
-   Optional: `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` for Google Custom Search, `DEFAULT_GEO` for trends region.
+   AI Router defaults to `https://api.airouter.ch/v1` and the faster `Qwen3.8` model with reasoning disabled for reliable content output. Override them with `AIROUTER_BASE_URL`, `AIROUTER_MODEL`, and `AIROUTER_REASONING_EFFORT` if needed. Optional: `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` for Google Custom Search, `DEFAULT_GEO` for trends region.
 
 ## Run
 
@@ -75,6 +75,18 @@ Generated files download from:
 ```
 http://127.0.0.1:8000/dev/apps/trending_article_agent/files/<filename>
 ```
+
+Each title first runs through the full research and editorial pipeline. If that
+pipeline exceeds its 120-second limit or an enrichment step fails, the service
+automatically generates a direct article document for the exact title instead
+of dropping the result.
+
+## Render deployment
+
+The repository includes `render.yaml` for a machine-independent Docker
+deployment. Create a new Blueprint in Render from this repository, enter
+`AIROUTER_API_KEY` in the secret prompt, and deploy. Render will provide the
+shareable HTTPS URL and redeploy automatically from the default branch.
 
 ## Project Layout
 

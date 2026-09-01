@@ -1,7 +1,7 @@
 """FactChecker agent â€” verifies claims against multiple sources."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 from ..tools.factcheck_tools import verify_claim
 
@@ -139,7 +139,7 @@ ERROR HANDLING:
 
 fact_checker_agent = LlmAgent(
     name="FactChecker",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Cross-references factual claims against multiple sources and assigns verification verdicts.",
     instruction=INSTRUCTION,
     tools=[verify_claim],

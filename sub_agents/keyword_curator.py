@@ -1,7 +1,7 @@
 """KeywordCurator agent â€” selects best keywords for content."""
 
 from google.adk.agents import LlmAgent
-from google.adk.models.lite_llm import LiteLlm
+from ..ai_router import ai_router_model
 
 _TODAY = __import__('datetime').date.today().strftime('%B %d, %Y')
 
@@ -110,7 +110,7 @@ ERROR HANDLING:
 
 keyword_curator_agent = LlmAgent(
     name="KeywordCurator",
-    model=LiteLlm(model="openai/deepseek-v4-flash"),
+    model=ai_router_model(),
     description="Selects the top 3 keywords from trend data and refines them into targeted search queries.",
     instruction=INSTRUCTION,
     tools=[],

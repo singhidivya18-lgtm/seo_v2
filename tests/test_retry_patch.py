@@ -39,9 +39,9 @@ class ShapeValidationTest(unittest.TestCase):
     def test_empty_choices_rejected(self):
         self.assertFalse(retry_patch._is_valid_response(SimpleNamespace(choices=[])))
 
-    def test_short_content_rejected(self):
+    def test_whitespace_rejected_and_short_content_accepted(self):
         self.assertFalse(retry_patch._is_valid_response(make_response("   \n  ")))
-        self.assertFalse(retry_patch._is_valid_response(make_response("hi")))
+        self.assertTrue(retry_patch._is_valid_response(make_response("hi")))
 
     def test_long_content_accepted(self):
         self.assertTrue(retry_patch._is_valid_response(make_response("A" * 200)))
@@ -69,13 +69,13 @@ class BackoffTest(unittest.TestCase):
             d2 = retry_patch._backoff_delay(2)
             self.assertGreater(d1, d0)
             self.assertGreater(d2, d1)
-            self.assertEqual(d0, 2.5)  # 2 + 0.5
-            self.assertEqual(d1, 4.5)
-            self.assertEqual(d2, 8.5)
+            self.assertEqual(d0, 1.5)  # 1 + 0.5
+            self.assertEqual(d1, 2.5)
+            self.assertEqual(d2, 4.5)
 
     def test_capped(self):
         with patch.object(retry_patch.random, "uniform", return_value=0.0):
-            self.assertLessEqual(retry_patch._backoff_delay(10), 31.0)
+            self.assertLessEqual(retry_patch._backoff_delay(10), 9.0)
 
 
 class RetryCoreTest(unittest.IsolatedAsyncioTestCase):
@@ -104,13 +104,13 @@ class RetryCoreTest(unittest.IsolatedAsyncioTestCase):
         async def factory():
             nonlocal calls
             calls += 1
-            if calls < 3:
+            if calls < retry_patch.MAX_RETRIES:
                 raise json.JSONDecodeError("Expecting value", "doc", 0)
             return make_response("A" * 100)
 
         resp = await retry_patch._call_with_retries(factory)
-        self.assertEqual(calls, 3)
-        self.assertEqual(self.sleep_mock.await_count, 2)
+        self.assertEqual(calls, retry_patch.MAX_RETRIES)
+        self.assertEqual(self.sleep_mock.await_count, retry_patch.MAX_RETRIES - 1)
 
     async def test_retries_after_invalid_shape(self):
         calls = 0
@@ -118,12 +118,12 @@ class RetryCoreTest(unittest.IsolatedAsyncioTestCase):
         async def factory():
             nonlocal calls
             calls += 1
-            if calls < 3:
+            if calls < retry_patch.MAX_RETRIES:
                 return make_response("")  # silently-accepted bug: now retried
             return make_response("A" * 100)
 
         resp = await retry_patch._call_with_retries(factory)
-        self.assertEqual(calls, 3)
+        self.assertEqual(calls, retry_patch.MAX_RETRIES)
 
     async def test_exhaustion_raises(self):
         calls = 0
@@ -242,4 +242,3 @@ class PatchAppliedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-
