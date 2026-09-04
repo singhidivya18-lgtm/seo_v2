@@ -269,6 +269,15 @@ export class SeoApp extends LitElement {
     }
   }
 
+  private async _cancelJob() {
+    try {
+      await fetch('/api/cancel', {method: 'POST'});
+      await this._refresh();
+    } catch {
+      // ignore
+    }
+  }
+
   private _statusClass(): string {
     if (this._job.state === 'error') return 'status-error';
     if (this._job.state === 'complete') return 'status-success';
@@ -357,6 +366,25 @@ export class SeoApp extends LitElement {
               <div class="result-main">
                 <strong>${result.title}</strong>
                 <div class="result-status">${this._renderResultStatus(result.status)}</div>
+                ${result.linkedin_post ? html`
+                  <details class="social-details">
+                    <summary>LinkedIn Post</summary>
+                    <div class="social-content">${result.linkedin_post}</div>
+                  </details>
+                ` : nothing}
+                ${result.twitter_thread ? html`
+                  <details class="social-details">
+                    <summary>Twitter/X Thread</summary>
+                    <div class="social-content">${result.twitter_thread}</div>
+                  </details>
+                ` : nothing}
+                ${result.image_url ? html`
+                  <div class="social-image">
+                    <a href=${result.image_url} target="_blank" rel="noopener">
+                      <span class="button-icon">🖼</span> View Image
+                    </a>
+                  </div>
+                ` : nothing}
               </div>
             </article>
           `,
@@ -459,6 +487,11 @@ export class SeoApp extends LitElement {
                     ${this._busy ? html`<span class="spinner"></span>` : html`<span class="button-icon">→</span>`}
                     ${this._busy ? 'Working...' : 'Generate content kit'}
                   </button>
+                  ${this._busy ? html`
+                    <button class="button button-cancel" @click=${() => void this._cancelJob()}>
+                      <span class="button-icon">✕</span> Cancel
+                    </button>
+                  ` : nothing}
                 </div>
               </div>
 
@@ -1061,6 +1094,17 @@ export class SeoApp extends LitElement {
       background: #b2f1d7;
     }
 
+    .button-cancel {
+      color: #f0b0bb;
+      border: 1px solid rgba(239, 155, 168, 0.28);
+      background: rgba(131, 49, 69, 0.12);
+    }
+
+    .button-cancel:hover {
+      background: rgba(131, 49, 69, 0.28);
+      border-color: rgba(239, 155, 168, 0.5);
+    }
+
     .button-icon {
       font-size: 16px;
       font-weight: 400;
@@ -1356,6 +1400,57 @@ export class SeoApp extends LitElement {
       font-size: 10px;
       letter-spacing: 0.06em;
       text-transform: uppercase;
+    }
+
+    .social-details {
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .social-details summary {
+      padding: 8px 10px;
+      cursor: pointer;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(142, 229, 194, 0.04);
+      transition: background 160ms ease;
+    }
+
+    .social-details summary:hover {
+      background: rgba(142, 229, 194, 0.08);
+    }
+
+    .social-content {
+      padding: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+      border-top: 1px solid var(--line);
+    }
+
+    .social-image {
+      margin-top: 8px;
+    }
+
+    .social-image a {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent);
+      font-size: 11px;
+      text-decoration: none;
+    }
+
+    .social-image a:hover {
+      color: #b2f1d7;
     }
 
     .result-error {

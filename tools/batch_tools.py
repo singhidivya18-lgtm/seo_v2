@@ -316,6 +316,9 @@ def _result_dict(
     note: str = "",
     job_id: str | None = None,
     extra: dict[str, Any] | None = None,
+    linkedin_post: str | None = None,
+    twitter_thread: str | None = None,
+    image_url: str | None = None,
 ) -> dict[str, Any]:
     from urllib.parse import quote
 
@@ -333,6 +336,12 @@ def _result_dict(
         result["note"] = note
     if extra:
         result.update(extra)
+    if linkedin_post:
+        result["linkedin_post"] = linkedin_post
+    if twitter_thread:
+        result["twitter_thread"] = twitter_thread
+    if image_url:
+        result["image_url"] = image_url
     return result
 
 
@@ -347,6 +356,55 @@ def _rename_embed_job_id(docx_path: str, job_id: str) -> str:
         raise RuntimeError(f"Cannot embed job_id: target already exists: {new_path}")
     os.rename(docx_path, new_path)
     return new_path
+
+
+async def _generate_social_from_events(events: list, title: str, job_id: str | None = None) -> tuple[str, str, str]:
+    """Extract article content from pipeline events and generate LinkedIn, Twitter, image."""
+    from .social_tools import format_linkedin_post, format_twitter_thread
+    from .image_generator import generate_image
+
+    # Extract article text from events (look for approve agent output or final content)
+    article_text = ""
+    for event in reversed(events):
+        content = getattr(event, "content", None)
+        if content:
+            parts = getattr(content, "parts", []) or []
+            for part in parts:
+                text = getattr(part, "text", "") or ""
+                if len(text) > 300:
+                    article_text = text
+                    break
+        if article_text:
+            break
+
+    if not article_text or len(article_text) < 200:
+        return "", "", ""
+
+    linkedin_post = ""
+    twitter_thread = ""
+    image_url = ""
+
+    try:
+        linkedin_result, twitter_result, image_result = await asyncio.gather(
+            asyncio.wait_for(format_linkedin_post(article_text), timeout=_FALLBACK_TIMEOUT_SECONDS),
+            asyncio.wait_for(format_twitter_thread(article_text), timeout=_FALLBACK_TIMEOUT_SECONDS),
+            asyncio.wait_for(generate_image(title, title), timeout=_FALLBACK_TIMEOUT_SECONDS),
+            return_exceptions=True,
+        )
+
+        if isinstance(linkedin_result, dict) and linkedin_result.get("status") == "success":
+            linkedin_post = linkedin_result.get("post", "")
+        if isinstance(twitter_result, dict) and twitter_result.get("status") == "success":
+            tweets = twitter_result.get("thread", [])
+            twitter_thread = "\n\n".join(f"{i+1}/ {t}" for i, t in enumerate(tweets))
+        if isinstance(image_result, dict) and image_result.get("status") == "success":
+            filename = image_result.get("filename", "")
+            if filename:
+                image_url = f"/files/{filename}"
+    except Exception:
+        pass
+
+    return linkedin_post, twitter_thread, image_url
 
 
 async def _execute_pipeline(
@@ -397,7 +455,8 @@ async def _execute_pipeline(
                 if job_id:
                     docx_path = _rename_embed_job_id(docx_path, job_id)
                     assert job_id in docx_path, f"job_id {job_id} missing from {docx_path}"
-                return _result_dict(title, docx_path, job_id=job_id), ""
+                linkedin_post, twitter_thread, image_url = await _generate_social_from_events(events, title, job_id)
+                return _result_dict(title, docx_path, job_id=job_id, linkedin_post=linkedin_post, twitter_thread=twitter_thread, image_url=image_url), ""
 
         after = _docx_snapshot(_resolve_output_dir())
         new_files = _new_docx_files(before, after)
@@ -413,7 +472,8 @@ async def _execute_pipeline(
             docx_path = os.path.join(_resolve_output_dir(), docx_path)
             if job_id:
                 assert job_id in docx_path, f"job_id {job_id} missing from {docx_path}"
-            return _result_dict(title, docx_path, job_id=job_id), ""
+            linkedin_post, twitter_thread, image_url = await _generate_social_from_events(events, title, job_id)
+            return _result_dict(title, docx_path, job_id=job_id, linkedin_post=linkedin_post, twitter_thread=twitter_thread, image_url=image_url), ""
 
         fallback_content = _extract_content(events)
         if not fallback_content:
@@ -452,6 +512,8 @@ async def _execute_pipeline(
 async def _generate_fallback_article(title: str, job_id: str | None = None) -> dict[str, Any]:
     """Generate an article directly when the enrichment pipeline cannot finish."""
     from litellm import acompletion
+    from .social_tools import format_linkedin_post, format_twitter_thread
+    from .image_generator import generate_image
 
     prompt = f"""Write a complete, publication-ready SEO article about this exact title:
 {title}
@@ -486,11 +548,43 @@ Requirements:
                 "error_message": "AI Router fallback returned an article that was too short.",
             }
 
+        # Generate LinkedIn, Twitter, and image concurrently
+        linkedin_result = None
+        twitter_result = None
+        image_result = None
+        try:
+            linkedin_result, twitter_result, image_result = await asyncio.gather(
+                asyncio.wait_for(format_linkedin_post(content), timeout=_FALLBACK_TIMEOUT_SECONDS),
+                asyncio.wait_for(format_twitter_thread(content), timeout=_FALLBACK_TIMEOUT_SECONDS),
+                asyncio.wait_for(generate_image(title, title), timeout=_FALLBACK_TIMEOUT_SECONDS),
+                return_exceptions=True,
+            )
+        except Exception:
+            pass
+
+        linkedin_post = ""
+        if isinstance(linkedin_result, dict) and linkedin_result.get("status") == "success":
+            linkedin_post = linkedin_result.get("post", "")
+
+        twitter_thread = ""
+        if isinstance(twitter_result, dict) and twitter_result.get("status") == "success":
+            tweets = twitter_result.get("thread", [])
+            twitter_thread = "\n\n".join(f"{i+1}/ {t}" for i, t in enumerate(tweets))
+
+        image_url = ""
+        if isinstance(image_result, dict) and image_result.get("status") == "success":
+            filename = image_result.get("filename", "")
+            if filename:
+                image_url = f"/files/{filename}"
+
         document = await generate_docx(
             article_text=content,
             title=title,
             output_dir=_resolve_output_dir(),
             job_id=job_id,
+            linkedin_post=linkedin_post or None,
+            twitter_thread=twitter_thread or None,
+            image_paths=image_url or None,
         )
         if document.get("status") != "success":
             return {
@@ -506,6 +600,9 @@ Requirements:
             fallback_used=True,
             note="The full enrichment pipeline exceeded its time limit; a direct article was generated.",
             job_id=job_id,
+            linkedin_post=linkedin_post,
+            twitter_thread=twitter_thread,
+            image_url=image_url,
         )
     except Exception as e:
         return {"status": "error", "error_message": f"Direct article fallback failed: {e}"}
@@ -747,6 +844,9 @@ async def run_article_batch(
             "filepath": r.get("filepath", ""),
             "url": r.get("url", ""),
             "fallback_used": r.get("fallback_used", False),
+            "linkedin_post": r.get("linkedin_post", ""),
+            "twitter_thread": r.get("twitter_thread", ""),
+            "image_url": r.get("image_url", ""),
         }
         for r in done
     ]

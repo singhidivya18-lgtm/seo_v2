@@ -63,6 +63,7 @@ app.add_middleware(
 )
 
 _subscribers: set[asyncio.Queue] = set()
+_cancel_event = asyncio.Event()
 _job: dict[str, Any] = {
     "state": "idle",  # idle | curating | ready | running | complete | partial | error
     "titles": [],
@@ -359,17 +360,29 @@ async def _run_batch(
     try:
         result = await run_article_batch(titles, concurrency=concurrency, max_rounds=max_rounds)
         async with _job_lock:
+            if _cancel_event.is_set():
+                _cancel_event.clear()
+                _job.update(state="idle", message="Generation cancelled.", results=[])
+                await _publish_state()
+                return
             if result.get("status") == "success":
                 ok_entries = result.get("ok", [])
                 failed_entries = result.get("failures", [])
                 mapped = []
                 for r in ok_entries:
-                    mapped.append(
-                        {
-                            "title": r.get("title", ""),
-                            "status": f"**[{r.get('filename', '')}]({r.get('url', '')})**",
-                        }
-                    )
+                    entry: dict[str, Any] = {
+                        "title": r.get("title", ""),
+                        "status": f"**[{r.get('filename', '')}]({r.get('url', '')})**",
+                        "filename": r.get("filename", ""),
+                        "url": r.get("url", ""),
+                    }
+                    if r.get("linkedin_post"):
+                        entry["linkedin_post"] = r["linkedin_post"]
+                    if r.get("twitter_thread"):
+                        entry["twitter_thread"] = r["twitter_thread"]
+                    if r.get("image_url"):
+                        entry["image_url"] = r["image_url"]
+                    mapped.append(entry)
                 for r in failed_entries:
                     mapped.append(
                         {
@@ -490,6 +503,23 @@ async def action(request: Request):
         return {"ok": True, "message": f"Batch started for {len(titles)} titles"}
 
     return JSONResponse({"ok": False, "error": "Unknown action"}, status_code=400)
+
+
+@app.post("/api/cancel")
+async def cancel():
+    """Cancel the currently running job."""
+    async with _job_lock:
+        state = _job["state"]
+        if state not in ("curating", "running"):
+            return {"ok": True, "message": "Nothing to cancel."}
+        _cancel_event.set()
+        _job.update(
+            state="idle",
+            message="Generation cancelled.",
+            results=[],
+        )
+        await _publish_state()
+    return {"ok": True, "message": "Job cancelled."}
 
 
 @app.get("/api/sessions")
