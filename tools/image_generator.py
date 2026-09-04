@@ -247,7 +247,8 @@ async def generate_image(description: str, article_title: str = "Article") -> di
             raise Exception(f"No real image found for: {description}")
 
         output_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.environ.get("SEO_DATA_DIR", "").strip()
+            or os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "generated_images",
         )
         os.makedirs(output_dir, exist_ok=True)

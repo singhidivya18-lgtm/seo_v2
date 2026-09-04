@@ -560,6 +560,8 @@ async def file_download(name: str):
     safe = os.path.basename(name)
     path = os.path.join(DATA_DIR, safe)
     if not os.path.isfile(path):
+        path = os.path.join(DATA_DIR, "generated_images", safe)
+    if not os.path.isfile(path):
         return JSONResponse({"error": "not found"}, status_code=404)
     return FileResponse(path, filename=safe)
 
