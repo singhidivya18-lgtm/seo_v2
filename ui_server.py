@@ -339,6 +339,40 @@ async def _run_curate(field: str, claimed: bool = False) -> None:
         await _publish_state()
 
 
+async def _batch_heartbeat(total: int, started: float) -> None:
+    """Keep the status message alive during long batches.
+
+    A single article can take several minutes (pipeline + fallback + social
+    copy). Without this the UI sits on a frozen message and looks dead.
+    Every 20s, refresh the message with elapsed time and documents finished
+    so far (read from the batch progress journal when available).
+    """
+    try:
+        while True:
+            await asyncio.sleep(20)
+            async with _job_lock:
+                if _job["state"] != "running":
+                    return
+                done = 0
+                try:
+                    with open(
+                        os.path.join(DATA_DIR, "batch_progress.json"),
+                        encoding="utf-8",
+                    ) as f:
+                        payload = json.load(f)
+                    done = len(payload.get("results", []))
+                except Exception:
+                    pass
+                elapsed = int(time.monotonic() - started)
+                _job["message"] = (
+                    f"Working… {done}/{total} documents so far "
+                    f"({elapsed}s elapsed). Each article can take several minutes."
+                )
+            await _publish_state()
+    except asyncio.CancelledError:
+        pass
+
+
 async def _run_batch(
     titles: list[str], concurrency: int, max_rounds: int, claimed: bool = False
 ) -> None:
@@ -357,6 +391,7 @@ async def _run_batch(
                 message=f"Running batch for {len(titles)} titles…",
             )
             await _publish_state()
+    heartbeat = asyncio.create_task(_batch_heartbeat(len(titles), time.monotonic()))
     try:
         result = await run_article_batch(titles, concurrency=concurrency, max_rounds=max_rounds)
         async with _job_lock:
@@ -440,6 +475,8 @@ async def _run_batch(
         async with _job_lock:
             _job.update(state="error", message=f"Batch failed: {e}")
         await _publish_state()
+    finally:
+        heartbeat.cancel()
 
 
 @app.post("/api/action")
